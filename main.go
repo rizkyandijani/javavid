@@ -46,6 +46,13 @@ type App struct {
 }
 
 func main() {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("unexpected error: %v", r)
+			waitForEnter()
+		}
+	}()
+
 	ffmpeg, err := internal.FindFFmpeg()
 	if err != nil {
 		log.Printf("WARNING: %v", err)
@@ -55,7 +62,9 @@ func main() {
 
 	root, err := os.MkdirTemp("", "javavid-")
 	if err != nil {
-		log.Fatal(err)
+		log.Printf("error: %v", err)
+		waitForEnter()
+		return
 	}
 	app := &App{
 		rootDir:  root,
@@ -65,7 +74,9 @@ func main() {
 
 	sub, err := fs.Sub(staticFS, "static")
 	if err != nil {
-		log.Fatal(err)
+		log.Printf("error: %v", err)
+		waitForEnter()
+		return
 	}
 
 	mux := http.NewServeMux()
@@ -106,7 +117,8 @@ func main() {
 	case err := <-done:
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			_ = os.RemoveAll(app.rootDir)
-			log.Fatal(err)
+			log.Printf("server error: %v", err)
+			waitForEnter()
 		}
 	case <-sigCh:
 		log.Printf("shutting down, cleaning %s", app.rootDir)
@@ -128,6 +140,11 @@ func openBrowser(url string) error {
 	default:
 		return exec.Command("xdg-open", url).Start()
 	}
+}
+
+func waitForEnter() {
+	log.Printf("Press Enter to exit...")
+	_, _ = fmt.Scanln()
 }
 
 func (a *App) handleHealth(w http.ResponseWriter, r *http.Request) {
