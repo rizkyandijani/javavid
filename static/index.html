@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>javavid — video to GIF</title>
+  <link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+  <header>
+    <h1>javavid</h1>
+    <span class="muted">video &rarr; GIF</span>
+    <span id="health" class="muted"></span>
+  </header>
+
+  <main>
+    <section id="drop" class="card">
+      <div id="drop-inner">
+        <p><strong>Drop a video here</strong> or
+          <label class="btn primary">
+            <input type="file" id="file" accept="video/*" hidden />
+            choose a file
+          </label>
+        </p>
+        <p class="muted small">MP4, MOV, MKV, WebM &mdash; anything ffmpeg can read</p>
+      </div>
+    </section>
+
+    <section id="source" class="card hidden">
+      <div class="row">
+        <video id="video" controls muted playsinline></video>
+        <div class="meta" id="meta"></div>
+      </div>
+
+      <div class="timeline">
+        <div class="thumbs" id="thumbs"></div>
+        <div class="track" id="track">
+          <div class="range" id="range"></div>
+          <div class="handles">
+            <input type="range" id="start" min="0" max="1" step="0.01" value="0" />
+            <input type="range" id="end" min="0" max="1" step="0.01" value="1" />
+          </div>
+          <div class="scrub" id="scrub"></div>
+        </div>
+        <div class="time-row">
+          <span id="t-start">0.00s</span>
+          <span id="t-scrub">0.00s</span>
+          <span id="t-end">0.00s</span>
+        </div>
+      </div>
+    </section>
+
+    <section id="controls" class="card hidden">
+      <div class="grid">
+        <div>
+          <label>FPS</label>
+          <div class="seg" id="fps-presets">
+            <button data-v="10">10</button>
+            <button data-v="15">15</button>
+            <button data-v="20">20</button>
+            <button data-v="24">24</button>
+            <button data-v="30">30</button>
+            <button data-v="custom" class="custom">custom</button>
+          </div>
+          <input type="number" id="fps-custom" min="1" max="60" step="1" placeholder="fps" disabled />
+        </div>
+
+        <div>
+          <label>Resolution</label>
+          <div class="seg" id="res-presets">
+            <button data-v="original">original</button>
+            <button data-v="1080">1080p</button>
+            <button data-v="720">720p</button>
+            <button data-v="480">480p</button>
+            <button data-v="custom" class="custom">custom</button>
+          </div>
+          <div class="custom-res">
+            <input type="number" id="res-w" placeholder="W" disabled />
+            <span>&times;</span>
+            <input type="number" id="res-h" placeholder="H" disabled />
+            <label class="lock"><input type="checkbox" id="res-lock" checked /> keep aspect</label>
+          </div>
+        </div>
+
+        <div>
+          <label>Quality</label>
+          <div class="seg" id="mode">
+            <button data-v="fast">Fast</button>
+            <button data-v="high" class="active">High</button>
+          </div>
+          <label class="check"><input type="checkbox" id="dither" checked /> dither</label>
+        </div>
+
+        <div>
+          <label>Loop</label>
+          <div class="seg" id="loop">
+            <button data-v="0" class="active">infinite</button>
+            <button data-v="1">1&times;</button>
+            <button data-v="3">3&times;</button>
+            <button data-v="5">5&times;</button>
+            <button data-v="custom" class="custom">custom</button>
+          </div>
+          <input type="number" id="loop-custom" min="0" max="99" step="1" placeholder="N" disabled />
+        </div>
+      </div>
+
+      <div class="actions">
+        <button id="convert" class="btn primary">Convert</button>
+        <div class="progress hidden" id="progress"><div id="progress-bar"></div></div>
+        <span id="progress-text" class="muted"></span>
+      </div>
+    </section>
+
+    <section id="result" class="card hidden">
+      <h2>Result</h2>
+      <img id="result-img" alt="GIF preview" />
+      <div class="actions">
+        <a id="download" class="btn" download>Download</a>
+        <button id="save-folder" class="btn">Save to folder&hellip;</button>
+        <span id="save-path-info" class="muted small"></span>
+      </div>
+    </section>
+
+    <section id="errors" class="card hidden">
+      <ul id="error-list"></ul>
+    </section>
+  </main>
+
+  <dialog id="save-dialog">
+    <form method="dialog">
+      <h3>Save destination</h3>
+      <p class="muted small">On Chromium browsers, &ldquo;Pick folder&rdquo; uses the native picker; otherwise paste a path below.</p>
+      <button type="button" id="pick-folder" class="btn">Pick folder&hellip;</button>
+      <p>or</p>
+      <input type="text" id="folder-input" placeholder="/path/to/folder" />
+      <menu>
+        <button value="cancel">Cancel</button>
+        <button value="ok" id="save-ok" class="primary">OK</button>
+      </menu>
+    </form>
+  </dialog>
+
+  <script src="/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,8 @@
+javavid
+bin/
+*.gif
+*.mp4
+*.mov
+*.mkv
+tmp/
+.DS_Store
