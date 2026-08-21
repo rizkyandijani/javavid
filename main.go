@@ -13,12 +13,15 @@ import (
 	"mime"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 
 	"javavid/internal"
 )
@@ -92,6 +95,13 @@ func main() {
 		done <- srv.ListenAndServe()
 	}()
 
+	go func() {
+		time.Sleep(300 * time.Millisecond)
+		if err := openBrowser("http://" + addr); err != nil {
+			log.Printf("could not open browser: %v", err)
+		}
+	}()
+
 	select {
 	case err := <-done:
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -106,6 +116,17 @@ func main() {
 
 	if err := os.RemoveAll(app.rootDir); err != nil {
 		log.Printf("workspace cleanup failed: %v", err)
+	}
+}
+
+func openBrowser(url string) error {
+	switch runtime.GOOS {
+	case "windows":
+		return exec.Command("rundll32", "url.dll,FileProtocolHandler", url).Start()
+	case "darwin":
+		return exec.Command("open", url).Start()
+	default:
+		return exec.Command("xdg-open", url).Start()
 	}
 }
 
