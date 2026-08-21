@@ -12,7 +12,27 @@ go build -o javavid .
 ./javavid            # opens http://127.0.0.1:8090
 ```
 
-## Dependencies
+## Prebuilt binaries
+
+Windows 64-bit bundle (no Go or ffmpeg install needed):
+
+```
+dist/windows/
+├── javavid.exe        # the app (UI embedded)
+├── ffmpeg.exe         # static ffmpeg — must stay next to javavid.exe
+└── LICENSE-ffmpeg.txt
+```
+
+Download `dist/windows/`, double-click `javavid.exe`, open http://127.0.0.1:8090.
+
+## Build from source
+
+```bash
+go build -o javavid .
+./javavid            # opens http://127.0.0.1:8090
+```
+
+## Dependencies (source builds)
 
 - Go 1.22+
 - ffmpeg (static binary next to `javavid`, or on PATH)
