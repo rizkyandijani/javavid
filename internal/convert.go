@@ -27,8 +27,59 @@ type ConvertOptions struct {
 	Mode       string
 	Dither     bool
 	Loop       int
+	Crop       *CropBox
+	Fit        string
 	Output     string
 	OnProgress func(percent float64)
+}
+
+// CropBox is a source-pixel rectangle. X/Y is the top-left corner.
+type CropBox struct {
+	X, Y, W, H int
+}
+
+const (
+	FitFill  = "fill"
+	FitBlack = "fit-black"
+	FitBlur  = "fit-blur"
+)
+
+func normFit(fit string) string {
+	switch fit {
+	case FitBlack, FitBlur:
+		return fit
+	default:
+		return FitFill
+	}
+}
+
+// outputChain builds the video filter body shared by Convert and ProbeSample.
+// crop is applied first at source resolution, then scaled to W×H.
+// fit decides what happens when shapes differ: fill scales to cover (the
+// historical behavior, may trim edges), fit-black letterboxes on black,
+// fit-blur composites the fit frame over a blurred fill. Blur needs
+// -filter_complex, hence the complex return.
+func outputChain(fps float64, crop *CropBox, fit string, w, h int, lanczos bool) (string, bool) {
+	flags := ""
+	if lanczos {
+		flags = ":flags=lanczos"
+	}
+	base := fmt.Sprintf("fps=%g", fps)
+	if crop != nil {
+		base += fmt.Sprintf(",crop=%d:%d:%d:%d", crop.W, crop.H, crop.X, crop.Y)
+	}
+	switch normFit(fit) {
+	case FitBlur:
+		return base + fmt.Sprintf(",split[a][b];"+
+			"[a]scale=%d:%d%s:force_original_aspect_ratio=increase,crop=%d:%d,gblur=sigma=20[bg];"+
+			"[b]scale=%d:%d%s:force_original_aspect_ratio=decrease[fg];"+
+			"[bg][fg]overlay=(W-w)/2:(H-h)/2", w, h, flags, w, h, w, h, flags), true
+	case FitBlack:
+		return base + fmt.Sprintf(",scale=%d:%d%s:force_original_aspect_ratio=decrease,"+
+			"pad=%d:%d:(ow-iw)/2:(oh-ih)/2", w, h, flags, w, h), false
+	default:
+		return base + fmt.Sprintf(",scale=%d:%d%s", w, h, flags), false
+	}
 }
 
 func NormalizeDim(n int) int {
@@ -63,10 +114,7 @@ func Convert(opts ConvertOptions) error {
 	if mode != "fast" && mode != "high" {
 		mode = "high"
 	}
-	dither := "bayer:bayer_scale=5"
-	if opts.Dither {
-		dither = "sierra2_4a"
-	}
+	ditherAlgo := ditherAlgo(opts.Dither)
 
 	out := opts.Output
 	if out == "" {
@@ -79,26 +127,122 @@ func Convert(opts ConvertOptions) error {
 	}
 	loopStr := strconv.Itoa(opts.Loop)
 
+	crop := opts.Crop
+	if crop != nil && (crop.W < 1 || crop.H < 1 || crop.X < 0 || crop.Y < 0) {
+		crop = nil
+	}
+	chain, complex := outputChain(opts.FPS, crop, opts.Fit, w, h, mode == "high")
+
 	if mode == "high" {
 		palette := out + ".palette.png"
+		palFilter := chain + ",palettegen"
+		if complex {
+			palFilter = "[0:v]" + palFilter
+		}
 		pass1 := buildArgs(opts.VideoPath, "", opts.Start, dur, w, h,
-			fmt.Sprintf("fps=%g,scale=%d:%d:flags=lanczos,palettegen", opts.FPS, w, h),
-			loopStr, palette)
+			palFilter, loopStr, palette, complex)
 		if err := runFFmpeg(pass1, nil); err != nil {
 			return err
 		}
 
-		filter := fmt.Sprintf("[0:v]fps=%g,scale=%d:%d:flags=lanczos[x];[x][1:v]paletteuse=dither=%s", opts.FPS, w, h, dither)
-		pass2 := buildArgs(opts.VideoPath, palette, opts.Start, dur, w, h, filter, loopStr, out)
+		useFilter := "[0:v]" + chain + "[x];[x][1:v]paletteuse=dither=" + ditherAlgo
+		pass2 := buildArgs(opts.VideoPath, palette, opts.Start, dur, w, h,
+			useFilter, loopStr, out, true)
 		return runFFmpeg(pass2, opts.OnProgress)
 	}
 
-	filter := fmt.Sprintf("fps=%g,scale=%d:%d", opts.FPS, w, h)
-	args := buildArgs(opts.VideoPath, "", opts.Start, dur, w, h, filter, loopStr, out)
+	fastFilter := chain
+	if complex {
+		fastFilter = "[0:v]" + chain
+	}
+	args := buildArgs(opts.VideoPath, "", opts.Start, dur, w, h,
+		fastFilter, loopStr, out, complex)
 	return runFFmpeg(args, opts.OnProgress)
 }
 
-func buildArgs(video, secondInput string, start, dur float64, w, h int, filter, loop, out string) []string {
+func ditherAlgo(dither bool) string {
+	if dither {
+		return "sierra2_4a"
+	}
+	return "bayer:bayer_scale=5"
+}
+
+// ProbeSample renders 1-frame and 2-frame GIFs through the same pipeline as
+// Convert and reports their byte sizes, so callers can extrapolate total size
+// as b1 * frames * clamp(b2/(2*b1)). t0 is the sample position in seconds.
+func ProbeSample(videoPath string, t0, fps float64, w, h int, mode string, dither bool, crop *CropBox, fit, dir string) (b1, b2 int64, err error) {
+	if videoPath == "" {
+		return 0, 0, errors.New("video path required")
+	}
+	if fps <= 0 {
+		fps = 10
+	}
+	w, h = NormalizeDim(w), NormalizeDim(h)
+	if w == 0 || h == 0 {
+		return 0, 0, errors.New("width and height must be positive")
+	}
+	if t0 < 0 {
+		t0 = 0
+	}
+	if mode != "fast" && mode != "high" {
+		mode = "high"
+	}
+	if crop != nil && (crop.W < 1 || crop.H < 1 || crop.X < 0 || crop.Y < 0) {
+		crop = nil
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return 0, 0, err
+	}
+
+	chain, complex := outputChain(fps, crop, fit, w, h, mode == "high")
+	var render func(frames int, out string) error
+
+	if mode == "high" {
+		palette := filepath.Join(dir, "est.palette.png")
+		palFilter := chain + ",palettegen"
+		if complex {
+			palFilter = "[0:v]" + palFilter
+		}
+		pass1 := buildArgs(videoPath, "", t0, 0.5, w, h, palFilter, "0", palette, complex)
+		if err := runFFmpeg(pass1, nil); err != nil {
+			return 0, 0, err
+		}
+		filter := "[0:v]" + chain + "[x];[x][1:v]paletteuse=dither=" + ditherAlgo(dither)
+		render = func(frames int, out string) error {
+			args := buildArgs(videoPath, palette, t0, 0.5, w, h, filter, "0", out, true, "-frames:v", strconv.Itoa(frames))
+			return runFFmpeg(args, nil)
+		}
+	} else {
+		fast := chain
+		if complex {
+			fast = "[0:v]" + chain
+		}
+		render = func(frames int, out string) error {
+			args := buildArgs(videoPath, "", t0, 0.5, w, h, fast, "0", out, complex, "-frames:v", strconv.Itoa(frames))
+			return runFFmpeg(args, nil)
+		}
+	}
+
+	out1 := filepath.Join(dir, "est1.gif")
+	out2 := filepath.Join(dir, "est2.gif")
+	if err := render(1, out1); err != nil {
+		return 0, 0, err
+	}
+	if err := render(2, out2); err != nil {
+		return 0, 0, err
+	}
+	st1, err := os.Stat(out1)
+	if err != nil {
+		return 0, 0, err
+	}
+	st2, err := os.Stat(out2)
+	if err != nil {
+		return 0, 0, err
+	}
+	return st1.Size(), st2.Size(), nil
+}
+
+func buildArgs(video, secondInput string, start, dur float64, w, h int, filter, loop, out string, complex bool, extra ...string) []string {
 	args := []string{
 		"-hide_banner", "-y",
 		"-nostdin",
@@ -109,13 +253,17 @@ func buildArgs(video, secondInput string, start, dur float64, w, h int, filter, 
 	}
 	if secondInput != "" {
 		args = append(args, "-i", secondInput)
-		if filter != "" {
-			args = append(args, "-filter_complex", filter)
-		}
-	} else if filter != "" {
-		args = append(args, "-vf", filter)
 	}
-	args = append(args, "-loop", loop, "-y", out)
+	if filter != "" {
+		if complex || secondInput != "" {
+			args = append(args, "-filter_complex", filter)
+		} else {
+			args = append(args, "-vf", filter)
+		}
+	}
+	args = append(args, "-loop", loop)
+	args = append(args, extra...)
+	args = append(args, "-y", out)
 	return args
 }
 

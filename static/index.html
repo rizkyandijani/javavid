@@ -28,8 +28,27 @@
 
     <section id="source" class="card hidden">
       <div class="row">
-        <video id="video" controls muted playsinline></video>
+        <div class="cropwrap">
+          <video id="video" controls muted playsinline></video>
+          <div id="crop-layer" class="hidden">
+            <div id="crop-box">
+              <i class="h" data-h="nw"></i><i class="h" data-h="ne"></i><i class="h" data-h="sw"></i><i class="h" data-h="se"></i>
+            </div>
+          </div>
+        </div>
         <div class="meta" id="meta"></div>
+      </div>
+
+      <div class="actions hidden" id="crop-bar">
+        <label class="check"><input type="checkbox" id="crop-toggle" /> Crop</label>
+        <div class="pick hidden" id="crop-presets" role="radiogroup" aria-label="Crop aspect ratio">
+          <button type="button" data-v="free" class="active" aria-pressed="true">Free</button>
+          <button type="button" data-v="1:1" aria-pressed="false">1:1</button>
+          <button type="button" data-v="4:3" aria-pressed="false">4:3</button>
+          <button type="button" data-v="3:2" aria-pressed="false">3:2</button>
+          <button type="button" data-v="16:9" aria-pressed="false">16:9</button>
+          <button type="button" data-v="9:16" aria-pressed="false">9:16</button>
+        </div>
       </div>
 
       <div class="timeline">
@@ -47,65 +66,89 @@
           <span id="t-scrub">0.00s</span>
           <span id="t-end">0.00s</span>
         </div>
+        <div class="actions">
+          <button id="preview" class="btn" aria-pressed="false">Preview selection</button>
+          <span id="sel-dur" class="muted small"></span>
+        </div>
       </div>
     </section>
 
     <section id="controls" class="card hidden">
-      <div class="grid">
-        <div>
-          <label>FPS</label>
-          <div class="seg" id="fps-presets">
-            <button data-v="10">10</button>
-            <button data-v="15">15</button>
-            <button data-v="20">20</button>
-            <button data-v="24">24</button>
-            <button data-v="30">30</button>
-            <button data-v="custom" class="custom">custom</button>
+      <div class="opts">
+        <fieldset class="opt">
+          <legend>FPS</legend>
+          <div class="pick" id="fps-presets" role="radiogroup" aria-label="Frames per second">
+            <button type="button" data-v="10" aria-pressed="false">10</button>
+            <button type="button" data-v="15" class="active" aria-pressed="true">15</button>
+            <button type="button" data-v="20" aria-pressed="false">20</button>
+            <button type="button" data-v="24" aria-pressed="false">24</button>
+            <button type="button" data-v="30" aria-pressed="false">30</button>
+            <button type="button" data-v="custom" aria-pressed="false">Custom</button>
           </div>
-          <input type="number" id="fps-custom" min="1" max="60" step="1" placeholder="fps" disabled />
-        </div>
+          <div class="sub hidden" id="fps-custom-row">
+            <input type="number" id="fps-custom" min="1" max="60" step="1" value="15" aria-label="Custom FPS" />
+            <span class="muted small">frames per second</span>
+          </div>
+        </fieldset>
 
-        <div>
-          <label>Resolution</label>
-          <div class="seg" id="res-presets">
-            <button data-v="original">original</button>
-            <button data-v="1080">1080p</button>
-            <button data-v="720">720p</button>
-            <button data-v="480">480p</button>
-            <button data-v="custom" class="custom">custom</button>
+        <fieldset class="opt">
+          <legend>Resolution</legend>
+          <div class="pick" id="res-presets" role="radiogroup" aria-label="Resolution">
+            <button type="button" data-v="original" class="active" aria-pressed="true">Original</button>
+            <button type="button" data-v="1080" aria-pressed="false">1080p</button>
+            <button type="button" data-v="720" aria-pressed="false">720p</button>
+            <button type="button" data-v="480" aria-pressed="false">480p</button>
+            <button type="button" data-v="custom" aria-pressed="false">Custom</button>
           </div>
-          <div class="custom-res">
-            <input type="number" id="res-w" placeholder="W" disabled />
-            <span>&times;</span>
-            <input type="number" id="res-h" placeholder="H" disabled />
+          <div class="sub hidden" id="res-custom-row">
+            <input type="number" id="res-w" aria-label="Custom width" placeholder="W" />
+            <span aria-hidden="true">&times;</span>
+            <input type="number" id="res-h" aria-label="Custom height" placeholder="H" />
             <label class="lock"><input type="checkbox" id="res-lock" checked /> keep aspect</label>
           </div>
-        </div>
+          <div class="muted small" id="res-summary"></div>
+        </fieldset>
 
-        <div>
-          <label>Quality</label>
-          <div class="seg" id="mode">
-            <button data-v="fast">Fast</button>
-            <button data-v="high" class="active">High</button>
+        <fieldset class="opt">
+          <legend>Quality</legend>
+          <div class="pick pick-2" id="mode" role="radiogroup" aria-label="Quality mode">
+            <button type="button" data-v="fast" aria-pressed="false">Fast<small>single-pass</small></button>
+            <button type="button" data-v="high" class="active" aria-pressed="true">High<small>two-pass palette</small></button>
           </div>
-          <label class="check"><input type="checkbox" id="dither" checked /> dither</label>
-        </div>
+          <div class="sub" id="dither-row">
+            <label class="check"><input type="checkbox" id="dither" checked /> dither</label>
+          </div>
+        </fieldset>
 
-        <div>
-          <label>Loop</label>
-          <div class="seg" id="loop">
-            <button data-v="0" class="active">infinite</button>
-            <button data-v="1">1&times;</button>
-            <button data-v="3">3&times;</button>
-            <button data-v="5">5&times;</button>
-            <button data-v="custom" class="custom">custom</button>
+        <fieldset class="opt">
+          <legend>Loop</legend>
+          <div class="pick" id="loop" role="radiogroup" aria-label="Loop count">
+            <button type="button" data-v="0" class="active" aria-pressed="true">Infinite</button>
+            <button type="button" data-v="1" aria-pressed="false">1&times;</button>
+            <button type="button" data-v="3" aria-pressed="false">3&times;</button>
+            <button type="button" data-v="5" aria-pressed="false">5&times;</button>
+            <button type="button" data-v="custom" aria-pressed="false">Custom</button>
           </div>
-          <input type="number" id="loop-custom" min="0" max="99" step="1" placeholder="N" disabled />
-        </div>
+          <div class="sub hidden" id="loop-custom-row">
+            <input type="number" id="loop-custom" min="0" max="99" step="1" value="0" aria-label="Custom loop count" />
+            <span class="muted small">0 = infinite</span>
+          </div>
+        </fieldset>
+
+        <fieldset class="opt">
+          <legend>Frame fit</legend>
+          <div class="pick" id="fit" role="radiogroup" aria-label="Frame fit">
+            <button type="button" data-v="fill" class="active" aria-pressed="true">Fill<small>cover, may trim</small></button>
+            <button type="button" data-v="fit-black" aria-pressed="false">Fit · black<small>letterbox</small></button>
+            <button type="button" data-v="fit-blur" aria-pressed="false">Fit · blur<small>glass background</small></button>
+          </div>
+          <div class="muted small">Used when the output shape differs from the source.</div>
+        </fieldset>
       </div>
 
       <div class="actions">
         <button id="convert" class="btn primary">Convert</button>
+        <span class="muted small">Estimated size <strong id="size-est">—</strong></span>
         <div class="progress hidden" id="progress"><div id="progress-bar"></div></div>
         <span id="progress-text" class="muted"></span>
       </div>

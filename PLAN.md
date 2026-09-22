@@ -28,7 +28,8 @@ ffmpeg discovery order (`internal/ffmpeg.go`): same dir as binary → PATH → e
 | `/api/probe?id=` | GET | metadata for a stored video |
 | `/api/thumbnails?id=` | GET | `{files:[thumbnail URLs]}` across timeline for the slider |
 | `/api/frame?id=&t=` | GET | single frame at time `t` (scrub preview) |
-| `/api/convert` | POST | `{id, start, end, fps, width, height, mode, dither, loop, saveToFolder, filename}` → ffmpeg, stream progress; `done` payload reports actual even-normalized `width`/`height` |
+| `/api/convert` | POST | `{id, start, end, fps, width, height, mode, dither, loop, crop, fit, saveToFolder, filename}` → ffmpeg, stream progress; `done` payload reports actual even-normalized `width`/`height` |
+| `/api/estimate` | POST | `{id, fps, width, height, mode, dither, crop, fit}` → `{bytes1, bytes2}` from 1-/2-frame probes through the convert pipeline; client extrapolates `b1 × frames × clamp(0.8×b2/2b1)` |
 | `/api/result/:file` | GET | download finished GIF (`/api/result/<file>` or `/api/result/results/<file>`); session thumbnails via `/api/result/<id>/<rel>` |
 | `/api/save-path` | POST | `{folder, file?}` resolve a user-chosen folder; with `file`, copies that finished GIF into it immediately |
 
@@ -69,13 +70,16 @@ Notes:
 ## Frontend controls
 
 - File picker + drag-drop → `<video>` preview
-- Dual-handle timeline slider over a thumbnail strip; scrub shows live frame
+- Dual-handle timeline slider over a thumbnail strip; moving a handle plays the selection (start seeks+plays, end restarts from start, stops at end); Preview loops it
+- Crop overlay on the preview (drag/resize, darken outside, aspect presets Free/1:1/4:3/3:2/16:9/9:16); resolution derives from the crop box
 - **FPS**: presets 10/15/20/24/30 + custom
 - **Resolution**: presets original/1080p/720p/480p + custom W×H with aspect-lock
+- **Frame fit**: Fill (cover, may trim) vs Fit on black bars vs Fit on blurred glass background, used when output shape differs from source
 - **Quality mode**: Fast (single-pass) vs High (two-pass palette)
 - **Dithering**: toggle (only applies in High mode)
 - **Loop**: infinite / N times
 - Convert → progress bar → GIF preview + **Download** + **Save to folder…** (native save picker via File System Access API where available, else a server-local folder path; a confirmed server folder also auto-saves future converts)
+- Live size estimate next to Convert (`≈ X MB`, warns at ≥10 MB), probed per config so users can trade resolution/fps for size.
 - Output filename defaults to `<source>.gif`, sanitized; falls back to a random id.
 - Error states: missing ffmpeg, invalid input, empty selection
 

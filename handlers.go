@@ -173,17 +173,44 @@ func (a *App) handleFrame(w http.ResponseWriter, r *http.Request) {
 }
 
 type convertRequest struct {
-	ID           string  `json:"id"`
-	Start        float64 `json:"start"`
-	End          float64 `json:"end"`
-	FPS          float64 `json:"fps"`
-	Width        int     `json:"width"`
-	Height       int     `json:"height"`
-	Mode         string  `json:"mode"`
-	Dither       bool    `json:"dither"`
-	Loop         int     `json:"loop"`
-	SaveToFolder bool    `json:"saveToFolder"`
-	Filename     string  `json:"filename"`
+	ID           string            `json:"id"`
+	Start        float64           `json:"start"`
+	End          float64           `json:"end"`
+	FPS          float64           `json:"fps"`
+	Width        int               `json:"width"`
+	Height       int               `json:"height"`
+	Mode         string            `json:"mode"`
+	Dither       bool              `json:"dither"`
+	Loop         int               `json:"loop"`
+	Crop         *internal.CropBox `json:"crop"`
+	Fit          string            `json:"fit"`
+	SaveToFolder bool              `json:"saveToFolder"`
+	Filename     string            `json:"filename"`
+}
+
+func normalizeCrop(c *internal.CropBox, sw, sh int) *internal.CropBox {
+	if c == nil {
+		return nil
+	}
+	if c.X < 0 {
+		c.X = 0
+	}
+	if c.Y < 0 {
+		c.Y = 0
+	}
+	if c.W < 1 || c.H < 1 || c.X >= sw || c.Y >= sh {
+		return nil
+	}
+	if c.X+c.W > sw {
+		c.W = sw - c.X
+	}
+	if c.Y+c.H > sh {
+		c.H = sh - c.Y
+	}
+	if c.X == 0 && c.Y == 0 && c.W == sw && c.H == sh {
+		return nil
+	}
+	return c
 }
 
 func (a *App) handleConvert(w http.ResponseWriter, r *http.Request) {
@@ -263,6 +290,8 @@ func (a *App) handleConvert(w http.ResponseWriter, r *http.Request) {
 		Mode:       req.Mode,
 		Dither:     req.Dither,
 		Loop:       req.Loop,
+		Crop:       normalizeCrop(req.Crop, s.Meta.Width, s.Meta.Height),
+		Fit:        req.Fit,
 		Output:     outPath,
 		OnProgress: onProgress,
 	}
@@ -332,6 +361,95 @@ func (a *App) handleResult(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Cache-Control", "no-cache")
 	http.ServeFile(w, r, path)
+}
+
+type estimateRequest struct {
+	ID     string            `json:"id"`
+	FPS    float64           `json:"fps"`
+	Width  int               `json:"width"`
+	Height int               `json:"height"`
+	Mode   string            `json:"mode"`
+	Dither bool              `json:"dither"`
+	Crop   *internal.CropBox `json:"crop"`
+	Fit    string            `json:"fit"`
+}
+
+type estimateResult struct {
+	Bytes1 int64 `json:"bytes1"`
+	Bytes2 int64 `json:"bytes2"`
+}
+
+func estimateKey(id string, fps float64, w, h int, mode string, dither bool, crop *internal.CropBox, fit string) string {
+	cx := "0:0:0:0"
+	if crop != nil {
+		cx = fmt.Sprintf("%d:%d:%d:%d", crop.X, crop.Y, crop.W, crop.H)
+	}
+	return fmt.Sprintf("%s|%g|%d|%d|%s|%t|%s|%s", id, fps, w, h, mode, dither, cx, fit)
+}
+
+func (a *App) handleEstimate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSONError(w, http.StatusMethodNotAllowed, "POST required")
+		return
+	}
+	var req estimateRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeJSONError(w, http.StatusBadRequest, "invalid JSON: "+err.Error())
+		return
+	}
+	s, ok := a.getSession(req.ID)
+	if !ok {
+		writeJSONError(w, http.StatusNotFound, "session not found")
+		return
+	}
+	fps := req.FPS
+	if fps <= 0 {
+		fps = s.Meta.FPS
+	}
+	width, height := req.Width, req.Height
+	if width <= 0 || height <= 0 {
+		width, height = s.Meta.Width, s.Meta.Height
+	}
+	width, height = internal.NormalizeDim(width), internal.NormalizeDim(height)
+	mode := req.Mode
+	if mode != "fast" && mode != "high" {
+		mode = "high"
+	}
+
+	key := estimateKey(req.ID, fps, width, height, mode, req.Dither, req.Crop, req.Fit)
+	a.estMu.Lock()
+	cached, hit := a.estCache[key]
+	a.estMu.Unlock()
+	if hit {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(cached)
+		return
+	}
+
+	t0 := s.Meta.Duration / 2
+	if t0 < 0 {
+		t0 = 0
+	}
+	probeDir, err := os.MkdirTemp(s.Dir, "est-")
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	defer os.RemoveAll(probeDir)
+
+	b1, b2, err := internal.ProbeSample(s.VideoPath, t0, fps, width, height, mode, req.Dither,
+		normalizeCrop(req.Crop, s.Meta.Width, s.Meta.Height), req.Fit, probeDir)
+	if err != nil {
+		writeJSONError(w, http.StatusInternalServerError, "estimate failed: "+err.Error())
+		return
+	}
+	res := estimateResult{Bytes1: b1, Bytes2: b2}
+	a.estMu.Lock()
+	a.estCache[key] = res
+	a.estMu.Unlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(res)
 }
 
 type savePathReq struct {

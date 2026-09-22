@@ -35,6 +35,8 @@ type App struct {
 	sessions   map[string]*Session
 	resultDirs []string
 	saveFolder string
+	estMu      sync.Mutex
+	estCache   map[string]estimateResult
 }
 
 func main() {
@@ -61,6 +63,7 @@ func main() {
 	app := &App{
 		rootDir:  root,
 		sessions: make(map[string]*Session),
+		estCache: make(map[string]estimateResult),
 	}
 	log.Printf("workspace: %s", root)
 
@@ -79,6 +82,7 @@ func main() {
 	mux.HandleFunc("/api/thumbnails", app.handleThumbnails)
 	mux.HandleFunc("/api/frame", app.handleFrame)
 	mux.HandleFunc("/api/convert", app.handleConvert)
+	mux.HandleFunc("/api/estimate", app.handleEstimate)
 	mux.HandleFunc("/api/result/", app.handleResult)
 	mux.HandleFunc("/api/save-path", app.handleSavePath)
 
