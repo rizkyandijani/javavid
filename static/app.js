@@ -1,6 +1,7 @@
 const state = {
   id: null,
   meta: null,
+  fileName: '',
   thumbFiles: [],
   start: 0,
   end: 0,
@@ -15,6 +16,9 @@ const state = {
   loop: 0,
   loopCustom: null,
   resLock: true,
+  saveFolder: '',
+  lastFile: '',
+  lastURL: '',
 };
 
 const $ = (id) => document.getElementById(id);
@@ -145,10 +149,13 @@ async function uploadFile(file) {
 
   state.id = j.id;
   state.meta = j;
+  state.fileName = file.name;
   state.start = 0;
   state.end = j.duration;
   state.scrub = 0;
   state.thumbFiles = [];
+  state.lastFile = '';
+  state.lastURL = '';
 
   els.video.src = URL.createObjectURL(file);
   els.meta.innerHTML =
@@ -157,6 +164,8 @@ async function uploadFile(file) {
 
   els.source.classList.remove('hidden');
   els.controls.classList.remove('hidden');
+  els.startRange.max = j.duration;
+  els.endRange.max = j.duration;
   els.startRange.value = 0;
   els.endRange.value = j.duration;
   updateTimeline();
@@ -244,7 +253,6 @@ async function scrubTo(t) {
     els.video.poster = url;
     els.video.dataset.frameUrl = url;
   } catch (e) {
-    // ignore scrub errors
   }
 }
 
@@ -297,7 +305,7 @@ function bindControls() {
       const srcH = state.meta.height;
       const ratio = srcW / srcH;
       state.resH = targetH;
-      state.resW = Math.round(targetH * ratio);
+      state.resW = Math.round(targetH * ratio / 2) * 2;
     }
   });
   els.resW.addEventListener('input', () => {
@@ -305,7 +313,7 @@ function bindControls() {
     let w = parseInt(els.resW.value, 10) || 0;
     state.resW = w;
     if (els.resLock.checked) {
-      const h = Math.round(w / (state.meta.width / state.meta.height));
+      const h = Math.round(w / (state.meta.width / state.meta.height) / 2) * 2;
       els.resH.value = h;
       state.resH = h;
     }
@@ -315,7 +323,7 @@ function bindControls() {
     let h = parseInt(els.resH.value, 10) || 0;
     state.resH = h;
     if (els.resLock.checked) {
-      const w = Math.round(h * (state.meta.width / state.meta.height));
+      const w = Math.round(h * (state.meta.width / state.meta.height) / 2) * 2;
       els.resW.value = w;
       state.resW = w;
     }
@@ -381,6 +389,7 @@ function bindConvert() {
     els.progressText.textContent = 'starting...';
     els.result.classList.add('hidden');
 
+    const base = (state.fileName || 'output').replace(/\.[^.]*$/, '') || 'output';
     const body = {
       id: state.id,
       start: state.start,
@@ -391,6 +400,8 @@ function bindConvert() {
       mode: state.mode,
       dither: els.dither.checked,
       loop: state.loop,
+      saveToFolder: !!state.saveFolder,
+      filename: base + '.gif',
     };
 
     try {
@@ -433,20 +444,26 @@ function bindConvert() {
               els.savePathInfo.textContent = ev.warning;
             }
           } catch (e) {
-            // ignore parse errors
           }
         }
       }
       if (final) {
         els.progressBar.style.width = '100%';
         els.progressText.textContent = 'done';
+        state.lastFile = final.file;
+        state.lastURL = final.url;
         els.resultImg.src = final.url + '?t=' + Date.now();
         els.download.href = final.url;
         els.download.download = final.file;
         els.result.classList.remove('hidden');
-        if (final.savedTo) {
-          els.savePathInfo.textContent = 'saved to: ' + final.savedTo;
+        let info = '';
+        if (final.width && final.height) {
+          info = `${final.width}\u00d7${final.height}`;
         }
+        if (final.savedTo) {
+          info += (info ? ' \u00b7 ' : '') + 'saved to: ' + final.savedTo;
+        }
+        els.savePathInfo.textContent = info;
       }
     } catch (e) {
       showError('convert request failed: ' + e.message);
@@ -463,17 +480,25 @@ function bindResult() {
     els.saveDialog.showModal();
   });
   els.pickFolder.addEventListener('click', async () => {
-    if (window.showDirectoryPicker) {
+    if (window.showSaveFilePicker && state.lastURL) {
       try {
-        const dir = await window.showDirectoryPicker();
-        els.folderInput.value = dir.name;
-        els.saveDialog.dataset.dirHandle = 'true';
+        const res = await fetch(state.lastURL);
+        const blob = await res.blob();
+        const handle = await window.showSaveFilePicker({
+          suggestedName: state.lastFile || 'output.gif',
+          types: [{ description: 'GIF image', accept: { 'image/gif': ['.gif'] } }],
+        });
+        const writable = await handle.createWritable();
+        await writable.write(blob);
+        await writable.close();
+        els.savePathInfo.textContent = 'saved via picker: ' + handle.name;
+        els.saveDialog.close();
+        return;
       } catch (e) {
-        // user cancelled
+        if (e && e.name === 'AbortError') return;
       }
-    } else {
-      els.folderInput.focus();
     }
+    els.folderInput.focus();
   });
   els.saveOk.addEventListener('click', async (e) => {
     e.preventDefault();
@@ -486,14 +511,15 @@ function bindResult() {
       const r = await fetch('/api/save-path', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ folder }),
+        body: JSON.stringify({ folder, file: state.lastFile }),
       });
       const j = await r.json();
       if (!r.ok) {
         showError(j.error || 'invalid folder');
         return;
       }
-      els.savePathInfo.textContent = 'save folder: ' + folder;
+      state.saveFolder = j.folder || folder;
+      els.savePathInfo.textContent = j.savedTo ? 'saved to: ' + j.savedTo : 'save folder: ' + state.saveFolder;
       els.saveDialog.close();
     } catch (e) {
       showError('save-path failed: ' + e.message);

@@ -26,18 +26,21 @@ ffmpeg discovery order (`internal/ffmpeg.go`): same dir as binary → PATH → e
 | `/api/health` | GET | `{status, ffmpeg, hasFfmpeg}` |
 | `/api/upload` | POST | save video to temp workspace, probe, return `{id, duration, width, height, fps, codec}` |
 | `/api/probe?id=` | GET | metadata for a stored video |
-| `/api/thumbnails?id=` | GET | low-res JPEG strip across timeline for the slider |
+| `/api/thumbnails?id=` | GET | `{files:[thumbnail URLs]}` across timeline for the slider |
 | `/api/frame?id=&t=` | GET | single frame at time `t` (scrub preview) |
-| `/api/convert` | POST | `{id, start, end, fps, width, height, mode, dither, loop, saveToFolder}` → ffmpeg, stream progress |
-| `/api/result/:file` | GET | download finished GIF |
-| `/api/save-path` | POST | resolve a user-chosen folder for "save to folder" |
+| `/api/convert` | POST | `{id, start, end, fps, width, height, mode, dither, loop, saveToFolder, filename}` → ffmpeg, stream progress; `done` payload reports actual even-normalized `width`/`height` |
+| `/api/result/:file` | GET | download finished GIF (`/api/result/<file>` or `/api/result/results/<file>`); session thumbnails via `/api/result/<id>/<rel>` |
+| `/api/save-path` | POST | `{folder, file?}` resolve a user-chosen folder; with `file`, copies that finished GIF into it immediately |
 
 Workspace: temp dir under the OS temp (e.g. `os.MkdirTemp`), keyed by `id`. Clean up on exit.
 
 ## ffmpeg commands
 
 ```bash
-# Probe
+# Probe (ffprobe preferred when on PATH, else ffmpeg -i stderr parsing)
+ffprobe -v error -select_streams v:0 \
+  -show_entries format=duration:stream=width,height,avg_frame_rate,codec_name \
+  -of default=noprint_wrappers=1 input
 ffmpeg -hide_banner -i input
 
 # Thumbnail strip (interval chosen so ~20-30 frames)
@@ -57,10 +60,11 @@ ffmpeg -ss START -t DUR -i in -vf "fps=FPS,scale=W:H" -loop <loop> -y out.gif
 ```
 
 Notes:
-- `W`/`H` must be **even numbers** (normalize odd → round down).
+- `W`/`H` must be **even numbers** (normalize odd → round down); the UI rounds presets to even and convert reports actual dims.
 - `-loop 0` = infinite; `-loop N` = play N times.
 - Progress: parse `out_time=` / `out_time_ms=` from stderr to report percent.
 - `-ss` before `-i` (fast seek); `-t DUR = end - start`.
+- Startup auto-opens the default browser; on fatal errors the console pauses for Enter (Windows double-click use).
 
 ## Frontend controls
 
@@ -71,14 +75,16 @@ Notes:
 - **Quality mode**: Fast (single-pass) vs High (two-pass palette)
 - **Dithering**: toggle (only applies in High mode)
 - **Loop**: infinite / N times
-- Convert → progress bar → GIF preview + **Download** + **Save to folder…**
+- Convert → progress bar → GIF preview + **Download** + **Save to folder…** (native save picker via File System Access API where available, else a server-local folder path; a confirmed server folder also auto-saves future converts)
+- Output filename defaults to `<source>.gif`, sanitized; falls back to a random id.
 - Error states: missing ffmpeg, invalid input, empty selection
 
 ## File layout
 
 ```
 javavid/
-├── main.go              # server + routes
+├── main.go              # server bootstrap + routes
+├── handlers.go          # API handlers + helpers
 ├── go.mod
 ├── internal/
 │   ├── ffmpeg.go        # locate ffmpeg (done)

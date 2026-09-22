@@ -102,7 +102,7 @@ func buildArgs(video, secondInput string, start, dur float64, w, h int, filter, 
 	args := []string{
 		"-hide_banner", "-y",
 		"-nostdin",
-		"-progress", "pipe:1",
+		"-progress", "pipe:2",
 		"-ss", strconv.FormatFloat(start, 'f', -1, 64),
 		"-t", strconv.FormatFloat(dur, 'f', -1, 64),
 		"-i", video,
@@ -125,20 +125,21 @@ func runFFmpeg(args []string, progress func(float64)) error {
 		return err
 	}
 	cmd := exec.Command(bin, args...)
-	stdout, err := cmd.StdoutPipe()
+	stderr, err := cmd.StderrPipe()
 	if err != nil {
 		return err
 	}
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
+	var captured bytes.Buffer
 	if err := cmd.Start(); err != nil {
 		return err
 	}
 	dur := parseDurFromArgs(args)
-	scanner := bufio.NewScanner(stdout)
+	scanner := bufio.NewScanner(stderr)
 	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
 	for scanner.Scan() {
 		line := scanner.Text()
+		captured.WriteString(line)
+		captured.WriteByte('\n')
 		if progress == nil {
 			continue
 		}
@@ -147,7 +148,7 @@ func runFFmpeg(args []string, progress func(float64)) error {
 		}
 	}
 	if err := cmd.Wait(); err != nil {
-		return fmt.Errorf("ffmpeg: %w: %s", err, stderr.String())
+		return fmt.Errorf("ffmpeg: %w: %s", err, captured.String())
 	}
 	return nil
 }

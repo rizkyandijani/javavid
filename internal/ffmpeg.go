@@ -8,9 +8,7 @@ import (
 	"runtime"
 )
 
-// FindFFmpeg locates the ffmpeg binary. It checks, in order:
-//  1. next to the current executable (bundled static build),
-//  2. on PATH.
+// Prefer a bundled binary next to the executable so tested builds win over PATH.
 func FindFFmpeg() (string, error) {
 	candidates := []string{"ffmpeg"}
 	if exe, err := os.Executable(); err == nil {

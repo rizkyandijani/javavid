@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"regexp"
 	"strconv"
+	"strings"
 )
 
 type VideoMeta struct {
@@ -63,14 +64,15 @@ func probeFFprobe(path string) (*VideoMeta, error) {
 
 func parseFFprobe(s string) (*VideoMeta, error) {
 	meta := &VideoMeta{}
-	for _, line := range splitLines(s) {
-		eq := indexByte(line, '=')
+	for _, raw := range strings.Split(s, "\n") {
+		line := strings.TrimSpace(raw)
+		eq := strings.IndexByte(line, '=')
 		if eq < 0 {
 			continue
 		}
-		key := trimSpace(line[:eq])
-		val := trimSpace(line[eq+1:])
-		switch k(key) {
+		key := strings.TrimSpace(line[:eq])
+		val := strings.TrimSpace(line[eq+1:])
+		switch key {
 		case "duration":
 			meta.Duration, _ = strconv.ParseFloat(val, 64)
 		case "width":
@@ -133,12 +135,14 @@ func probeFFmpeg(path string) (*VideoMeta, error) {
 		meta.Duration = h*3600 + mi*60 + s
 	}
 
-	for _, line := range splitLines(text) {
-		if !containsAny(line, "Video:") {
+	for _, line := range strings.Split(text, "\n") {
+		if !strings.Contains(line, "Video:") {
 			continue
 		}
 		if m := streamRE.FindStringSubmatch(line); m != nil {
-			meta.Codec = m[3]
+			if f := strings.Fields(m[1]); len(f) > 0 {
+				meta.Codec = f[0]
+			}
 			meta.Width, _ = strconv.Atoi(m[4])
 			meta.Height, _ = strconv.Atoi(m[5])
 		}
@@ -157,54 +161,4 @@ func probeFFmpeg(path string) (*VideoMeta, error) {
 		meta.FPS = 25
 	}
 	return meta, nil
-}
-
-func splitLines(s string) []string {
-	var lines []string
-	start := 0
-	for i := 0; i < len(s); i++ {
-		if s[i] == '\n' || s[i] == '\r' {
-			if i > start {
-				lines = append(lines, s[start:i])
-			}
-			start = i + 1
-		}
-	}
-	if start < len(s) {
-		lines = append(lines, s[start:])
-	}
-	return lines
-}
-
-func indexByte(s string, b byte) int {
-	for i := 0; i < len(s); i++ {
-		if s[i] == b {
-			return i
-		}
-	}
-	return -1
-}
-
-func trimSpace(s string) string {
-	start, end := 0, len(s)
-	for start < end && (s[start] == ' ' || s[start] == '\t') {
-		start++
-	}
-	for end > start && (s[end-1] == ' ' || s[end-1] == '\t') {
-		end--
-	}
-	return s[start:end]
-}
-
-func containsAny(s, sub string) bool {
-	for i := 0; i+len(sub) <= len(s); i++ {
-		if s[i:i+len(sub)] == sub {
-			return true
-		}
-	}
-	return false
-}
-
-func k(s string) string {
-	return s
 }
